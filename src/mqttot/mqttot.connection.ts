@@ -1,4 +1,5 @@
 import { Int64, ThriftDescriptors, ThriftPacketDescriptor, thriftWriteFromObject } from '../thrift';
+import { CapabilityHeader} from "../realtime"
 
 export type MQTToTConnectionData = Partial<{
    clientIdentifier: string;
@@ -11,7 +12,7 @@ export type MQTToTConnectionData = Partial<{
 }>;
 export type MQTToTConnectionAppSpecificInfo = Partial<{
    app_version: string;
-   'X-IG-Capabilities': string;
+   'X-IG-Capabilities': CapabilityHeader;
    everclear_subscriptions: string;
    'User-Agent': string;
    'Accept-Language': string;
