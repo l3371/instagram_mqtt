@@ -1,4 +1,3 @@
-import { IgApiClient } from 'instagram-private-api';
 import { REALTIME, RealtimeTopicsArray, Topics } from '../constants';
 import { Commands, DirectCommands } from './commands';
 import { compressDeflate, debugChannel, prepareLogString, ToEventFn, tryUnzipAsync } from '../shared';
@@ -23,6 +22,30 @@ export interface RealtimeClientInitOptions {
    additionalTlsOptions?: ConnectionOptions;
 }
 
+export type CapabilityHeader = { [key: string]: {
+   name: string;
+   value: string;
+}}[];
+
+//    {
+//        "value": "119.0,120.0,121.0,122.0,123.0,124.0,125.0,126.0,127.0,128.0,129.0,130.0,131.0,132.0,133.0,134.0,135.0,136.0,137.0,138.0,139.0,140.0,141.0,142.0",
+//        "name": "SUPPORTED_SDK_VERSIONS",
+//    },
+//    {"value": "14", "name": "FACE_TRACKER_VERSION"},
+//    {"value": "ETC2_COMPRESSION", "name": "COMPRESSION"},
+//    {"value": "gyroscope_enabled", "name": "gyroscope"},
+// ]
+
+export type State = {
+   appUserAgent: string;
+   phoneId: string;
+   sessionId: string;
+   cookieUserId: string;
+   appVersion: string;
+   capabilitiesHeader: CapabilityHeader,
+   language: string;
+}
+
 export class RealtimeClient extends EventEmitter<ToEventFn<RealtimeClientEvents>> {
    get mqtt(): MQTToTClient | undefined {
       return this._mqtt;
@@ -33,7 +56,7 @@ export class RealtimeClient extends EventEmitter<ToEventFn<RealtimeClientEvents>
 
    private _mqtt?: MQTToTClient;
    private connection?: MQTToTConnection;
-   private readonly ig: IgApiClient;
+   private readonly state: State;
 
    private initOptions?: RealtimeClientInitOptions;
    private safeDisconnect = false;
@@ -43,14 +66,14 @@ export class RealtimeClient extends EventEmitter<ToEventFn<RealtimeClientEvents>
 
    /**
     *
-    * @param {IgApiClient} ig
+    * @param {State} state
     * @param mixins - by default MessageSync and Realtime mixins are used
     */
-   public constructor(ig: IgApiClient, mixins: Mixin[] = [new MessageSyncMixin(), new RealtimeSubMixin()]) {
+   public constructor(state: State, mixins: Mixin[] = [new MessageSyncMixin(), new RealtimeSubMixin()]) {
       super();
-      this.ig = ig;
+      this.state = state;
       this.realtimeDebug(`Applying mixins: ${mixins.map(m => m.name).join(', ')}`);
-      applyMixins(mixins, this, this.ig);
+      applyMixins(mixins, this, this.state);
    }
 
    private setInitOptions(initOptions?: RealtimeClientInitOptions | string[]) {
@@ -65,14 +88,15 @@ export class RealtimeClient extends EventEmitter<ToEventFn<RealtimeClientEvents>
    }
 
    private constructConnection() {
-      const userAgent = this.ig.state.appUserAgent;
-      const deviceId = this.ig.state.phoneId;
-      const sessionid = this.ig.state.parsedAuthorization?.sessionid ?? this.ig.state.extractCookieValue('sessionid');
+      const userAgent = this.state.appUserAgent;
+      const deviceId = this.state.phoneId;
+      const sessionid = this.state.sessionId;
       const password = `sessionid=${sessionid}`;
+      
       this.connection = new MQTToTConnection({
          clientIdentifier: deviceId.substring(0, 20),
          clientInfo: {
-            userId: BigInt(Number(this.ig.state.cookieUserId)),
+            userId: BigInt(Number(this.state.cookieUserId)),
             userAgent,
             clientCapabilities: 183,
             endpointCapabilities: 0,
@@ -93,8 +117,8 @@ export class RealtimeClient extends EventEmitter<ToEventFn<RealtimeClientEvents>
          },
          password,
          appSpecificInfo: {
-            app_version: this.ig.state.appVersion,
-            'X-IG-Capabilities': this.ig.state.capabilitiesHeader,
+            app_version: this.state.appVersion,
+            'X-IG-Capabilities': this.state.capabilitiesHeader,
             everclear_subscriptions: JSON.stringify({
                inapp_notification_subscribe_comment: '17899377895239777',
                inapp_notification_subscribe_comment_mention_and_reply: '17899377895239777',
@@ -102,7 +126,7 @@ export class RealtimeClient extends EventEmitter<ToEventFn<RealtimeClientEvents>
                presence_subscribe: '17846944882223835',
             }),
             'User-Agent': userAgent,
-            'Accept-Language': this.ig.state.language.replace('_', '-'),
+            'Accept-Language': this.state.language.replace('_', '-'),
             platform: 'android',
             ig_mqtt_route: 'django',
             pubsub_msg_type_blacklist: 'direct, typing_type',
@@ -132,7 +156,7 @@ export class RealtimeClient extends EventEmitter<ToEventFn<RealtimeClientEvents>
       });
       this.commands = new Commands(this.mqtt!);
       this.direct = new DirectCommands(this.mqtt!);
-      this.mqtt!.on('message', async msg => {
+      this.mqtt!.on('message', async (msg) => {
          const unzipped = await tryUnzipAsync(msg.payload);
          const topic = RealtimeTopicsArray.find(t => t.id === msg.topic);
          if (topic && topic.parser && !topic.noParse) {
@@ -237,7 +261,7 @@ export class RealtimeClient extends EventEmitter<ToEventFn<RealtimeClientEvents>
          data: {
             seq_id,
             snapshot_at_ms,
-            snapshot_app_version: this.ig.state.appVersion,
+            snapshot_app_version: this.state.appVersion,
          },
       });
    }
